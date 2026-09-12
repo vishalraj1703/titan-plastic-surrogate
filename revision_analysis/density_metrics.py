@@ -63,6 +63,8 @@ def rollout_positions(klass, model, mu, sd, mode):
             with torch.no_grad():
                 res = model(torch.tensor((X - mu) / sd)).numpy()
             ru, rv = res[:, 0], res[:, 1]
+        elif mode == "windage":
+            ru, rv = windage * s["u10"], windage * s["v10"]
         else:
             ru = rv = 0.0
         vel_u, vel_v = cur_u + ru, cur_v + rv
@@ -122,7 +124,7 @@ def main():
         tlon, tlat = truth_positions(klass)
         truth_d = density_field(tlon, tlat, half, lon_edges, lat_edges)
 
-        for mode in ("baseline", "surrogate"):
+        for mode in ("baseline", "windage", "surrogate"):
             lon_h, lat_h = rollout_positions(klass, model, mu, sd, mode)
             pred_d = density_field(lon_h, lat_h, half, lon_edges, lat_edges)
             compare(mode, truth_d, pred_d)
