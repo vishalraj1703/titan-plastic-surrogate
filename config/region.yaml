@@ -1,0 +1,85 @@
+# TITAN prototype region + run configuration
+# Single source of truth for the scoped domain. Everything reads from here.
+
+region:
+  name: nw_mediterranean
+  # Bounding box: captures the Rhône river mouth (~4.85E, 43.33N) as the primary
+  # source and the Ligurian Sea as the downstream accumulation zone.
+  lon_min: 3.0
+  lon_max: 11.0
+  lat_min: 41.0
+  lat_max: 44.5
+  # Local UTM zone for lat/lon -> meters (Head 1 learns in meters, per blueprint Phase 2.3).
+  # Zone 31N covers ~0–6E; zone 32N covers 6–12E. Rhône sits on the 31/32 boundary.
+  # We use 32N as the common projection for the whole box (small distortion at the west edge).
+  utm_epsg: 32632
+
+copernicus:
+  # Surface currents. NOTE: the blueprint names GLOBAL_ANALYSISFORECAST_PHY_001_024 for
+  # U/V. Wind and significant wave height live in SEPARATE CMEMS products (WAV_001_027 for
+  # waves; winds come from a wind product or ERA5). We start with currents only; wind/wave
+  # fusion is added when the Windage kernel needs it (Milestone 2b).
+  currents_dataset: cmems_mod_glo_phy-cur_anfc_0.083deg_P1D-m
+  variables: [uo, vo]        # eastward / northward surface velocity
+  depth_surface: 0.494       # shallowest model level (m)
+  # Wind (Milestone 2b): multi-year reprocessed L4 blended wind, 0.125deg hourly.
+  # Regridded onto the current grid + daily-averaged into the cube as u10/v10.
+  wind_dataset: cmems_obs-wind_glo_phy_my_l4_0.125deg_PT1H
+  wind_variables: [eastward_wind, northward_wind]
+
+time:
+  # Short window to start — one month is plenty to validate the pipeline end to end.
+  start: "2024-01-01"
+  end:   "2024-01-31"
+
+sources:
+  # Release points for OceanParcels forward runs. `weight` = relative plastic emission
+  # (illustrative — the Rhône dominates land-based input to the NW Med; real per-river
+  # emission estimates would refine these). Weights are normalised at run time.
+  # Milestone 6 uses all sources; earlier milestones used the Rhône only.
+  - name: rhone         # major river, Gulf of Lions
+    lon: 4.85
+    lat: 43.33
+    weight: 0.50
+  - name: marseille     # urban coast
+    lon: 5.35
+    lat: 43.30
+    weight: 0.15
+  - name: nice_var      # Var / Côte d'Azur
+    lon: 7.20
+    lat: 43.68
+    weight: 0.12
+  - name: genoa         # Ligurian industrial coast
+    lon: 8.93
+    lat: 44.40
+    weight: 0.15
+  - name: tuscan        # Arno / Tuscan coast (Livorno)
+    lon: 10.30
+    lat: 43.55
+    weight: 0.08
+
+# --- Particle physics (blueprint Phase 2, macro/micro update) ------------------
+# Two behavioural classes. The OceanParcels kernels (Milestone 2) read these; the GNN
+# (Milestone 3) receives is_macro + size_class as node features and must LEARN to
+# reproduce the resulting behavioural difference. Ranges are sampled per-particle so the
+# model sees a spread, not a single value.
+particles:
+  micro:
+    is_macro: 0
+    windage_coeff: [0.01, 0.03]   # C_w: fraction of wind speed added as drift
+    diffusivity_kh: [10.0, 100.0] # K_h (m^2/s): strong turbulent random walk
+    inertial_damping: null        # micro-plastic instantly matches the current
+    size_class: [1, 2]            # 1-5 ordinal; micro occupies the small end
+    n_particles: 50000
+  macro:
+    is_macro: 1
+    windage_coeff: [0.05, 0.10]   # catches wind like a sail
+    diffusivity_kh: [0.5, 2.0]    # ~1 m^2/s: bulk-flow dominated, barely diffuses
+    inertial_damping: 3600.0      # relaxation time (s): drag eq., ~1h to match flow
+    size_class: [3, 5]            # large end
+    n_particles: 50000
+
+# Physical constants for the Windage kernel: V_wind = C_w * (rho_air/rho_water) * |U10|*U10
+constants:
+  rho_air: 1.225      # kg/m^3
+  rho_water: 1025.0   # kg/m^3 (seawater)
